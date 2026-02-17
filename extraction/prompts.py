@@ -15,7 +15,9 @@ def detect_marksheet_board(raw_text: str) -> str:
     if any(indicator in text_upper for indicator in [
         'CENTRAL BOARD OF SECONDARY EDUCATION',
         'CBSE',
-        'CENTRAL BOARD OF: SECONDARY EDUCATION' 
+        'CENTRAL BOARD OF: SECONDARY EDUCATION',
+        'CENTRAL BOARD OI SECONDARY EDUCATION'
+        
     ]):
         return 'cbse'
     
@@ -24,6 +26,8 @@ def detect_marksheet_board(raw_text: str) -> str:
         'COUNCIL FOR THE INDIAN SCHOOL',
         'CISCE',
         'INDIAN SCHOOL CERTIFICATE',
+        'NEW DELHI INDIAN CERTIFICATE OF SECONDARY EDUCATION '
+        'COUNCIL FOR THE INDIAN SCHOOL CERTIFICATE EXAMINATIONS'
     ]):
         return 'icse'
     

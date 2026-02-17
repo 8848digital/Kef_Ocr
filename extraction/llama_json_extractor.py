@@ -15,10 +15,11 @@ from .validators.cbse_validator import validate_and_fix_cbse_marksheet as valida
 
 
 
+
 class LlamaJSONExtractor:
     """Extract structured JSON from OCR text using Llama 3.1B"""
 
-    def __init__(self, model_name="Qwen/Qwen2.5-3B-Instruct"):
+    def __init__(self, model_name="/app/models/qwen"):
         print(f" Loading Llama model: {model_name}")
 
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -35,6 +36,7 @@ class LlamaJSONExtractor:
             torch_dtype=dtype,
             device_map="auto",
             low_cpu_mem_usage=True,
+            local_files_only=True
         )
 
         if torch.cuda.is_available():
@@ -103,6 +105,7 @@ class LlamaJSONExtractor:
                 data = validate_ssc(data, raw_text)
             elif board == "cbse":
                 data = validate_cbse(data, raw_text)
+            
             return data
 
         if data.get("document_type") == "income_certificate":
