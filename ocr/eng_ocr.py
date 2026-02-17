@@ -530,7 +530,7 @@ def extract_and_convert_to_json(file_path: Path, save_json=True) -> dict:
     
     try:
         # Import here to avoid circular dependency
-        from llama_json_extractor import LlamaJSONExtractor
+        from extraction.llama_json_extractor import LlamaJSONExtractor
         
         extractor = LlamaJSONExtractor()
         structured_data = extractor.extract_json(raw_text, doc_type)
@@ -653,7 +653,7 @@ if __name__ == "__main__":
     print("="*80 + "\n")
     
     # Single file test with JSON extraction
-    test_file = Path(r"C:\Users\Admin\Desktop\KJSS\KJS 10th Grade Results\10th_Marksheet_10186360_2218797394P9ECB.jpg")
+    test_file = Path(r"C:\Users\Admin\Desktop\KJSS\test_documents\J5Se26g.png")
     if test_file.exists():
         # Extract both OCR text AND JSON
         json_result = extract_and_convert_to_json(test_file, save_json=False)
