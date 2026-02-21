@@ -5,3 +5,5 @@ __pycache__/
 venv/
 Income certificate of 2024-25  (File responses)/
 uploads/
+hf-env/
+models/
