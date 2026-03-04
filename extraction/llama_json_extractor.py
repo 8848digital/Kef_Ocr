@@ -12,6 +12,8 @@ from extraction.prompts import (
 )
 from .validators.ssc_validator import validate_and_fix_ssc_marksheet as validate_ssc
 from .validators.cbse_validator import validate_and_fix_cbse_marksheet as validate_cbse
+from .validators.income_authorization_checker import check_authorization
+from .validators.marksheet_authorization_checker import check_marksheet_authorization
 
 
 
@@ -105,11 +107,14 @@ class LlamaJSONExtractor:
                 data = validate_ssc(data, raw_text)
             elif board == "cbse":
                 data = validate_cbse(data, raw_text)
-            
+            data["authorized"] = check_marksheet_authorization(raw_text)
             return data
 
         if data.get("document_type") == "income_certificate":
             data = self._cleanup_income_certificate(data, raw_text)
+            data["authorized"] = check_authorization(raw_text)
+
+            return data
 
         if data.get("document_type") not in ["pass_book", "passbook"]:
             return data

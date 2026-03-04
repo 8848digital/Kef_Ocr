@@ -78,7 +78,8 @@ def get_schema_for_doc_type(doc_type: str) -> dict:
             "student_name": "string or null",
             "income_years": "array of objects",
             "address": "string or null",
-            "validity_date": "string or null"
+            "validity_date": "string or null",
+            "authorized": "boolean"
         },
 
        
@@ -102,7 +103,8 @@ def get_schema_for_doc_type(doc_type: str) -> dict:
             "total_marks_obtained": "integer or null — from IN_WORDS spelling after max_marks",
             "total_max_marks": "integer — must be exactly 400 or 500 or 600",
             "percentage": "decimal number with 2 places or null — e.g. 85.60 not 428",
-            "result": "PASS or FAIL or DISTINCTION or ATKT or QUALIFIED or null"
+            "result": "PASS or FAIL or DISTINCTION or ATKT or QUALIFIED or null",
+            "authorized":"boolean"
         }
     }
     
