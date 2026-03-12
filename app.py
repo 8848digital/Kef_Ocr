@@ -1,113 +1,49 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
-from pathlib import Path
-import shutil
-import uuid
-from ocr.ocr_router import smart_ocr
-from extraction.llama_json_extractor import LlamaJSONExtractor
-
-app = FastAPI(
-    title="OCR + LLM Extraction API",
-    description="Indian Document OCR & Structured Extraction",
-    version="1.0.0"
-)
-
-UPLOAD_DIR = Path("uploads")
-UPLOAD_DIR.mkdir(exist_ok=True)
-
-# Don't instantiate at module level - use lazy loading instead
-llm_extractor = None
-
-def get_llm_extractor():
-    """
-    Lazy load the LLM model only when first needed.
-    This prevents double-loading during uvicorn --reload
-    """
-    global llm_extractor
-    if llm_extractor is None:
-        print(" Initializing LLM extractor (first time only)...")
-        llm_extractor = LlamaJSONExtractor()
-        print(" LLM extractor ready")
-    return llm_extractor
-
-def save_upload(file: UploadFile) -> Path:
-    suffix = Path(file.filename).suffix
-    file_path = UPLOAD_DIR / f"{uuid.uuid4()}{suffix}"
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-    return file_path
-
-@app.post("/ocr/raw-text")
-async def extract_raw_text(file: UploadFile = File(...)):
-    """
-    Returns ONLY raw OCR text (no LLM)
-    """
-    file_path = save_upload(file)
-    try:
-        ocr_result = smart_ocr(file_path)
-        if not ocr_result.get("success", True):
-            raise HTTPException(status_code=500, detail="OCR failed")
-        return {
-            "success": True,
-            "document_type": ocr_result.get("doc_type", "unknown"),
-            "raw_text": ocr_result["text"]
-        }
-    finally:
-        if file_path.exists():
-            file_path.unlink()
-
-@app.post("/ocr/llm-extract")
-async def extract_structured_data(file: UploadFile = File(...)):
-    """
-    Runs OCR + LLM and returns structured JSON
-    """
-    file_path = save_upload(file)
-    try:
-        # 1️ OCR
-        ocr_result = smart_ocr(file_path)
-        if not ocr_result.get("success", True):
-            raise HTTPException(status_code=500, detail="OCR failed")
-        
-        raw_text = ocr_result["text"]
-        doc_type = ocr_result.get("doc_type", "unknown")
-        
-        # 2️ LLM Extraction (lazy load model)
-        extractor = get_llm_extractor()
-        structured = extractor.extract_json(
-            raw_text=raw_text,
-            doc_type=doc_type
-        )
-        
-        return {
-            "success": True,
-            "document_type": doc_type,
-            "structured_data": structured,
-        }
-    finally:
-        if file_path.exists():
-            file_path.unlink()
-
-@app.get("/")
-async def root():
-    """
-    Health check endpoint
-    """
-    return {
-        "status": "running",
-        "model_loaded": llm_extractor is not None
-    }
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from pathlib import Path
 import shutil
 import uuid
 import traceback
+import asyncio
+from typing import List
 
 from ocr.ocr_router import smart_ocr
 from extraction.llama_json_extractor import LlamaJSONExtractor
 
+# ================================
+# Global LLM Instance
+# ================================
+llm_extractor = None
+
+
+# ================================
+# Lifespan Event Handler
+# ================================
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global llm_extractor
+    print(" Loading LLM model at startup...")
+    try:
+        llm_extractor = LlamaJSONExtractor()
+        print(" LLM model loaded successfully")
+    except Exception as e:
+        print(" Failed to load LLM model")
+        traceback.print_exc()
+        raise e
+
+    yield
+
+    print(" Shutting down...")
+
+
+# ================================
+# App Instance
+# ================================
 app = FastAPI(
     title="OCR + LLM Extraction API",
     description="Indian Document OCR & Structured Extraction",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # ================================
@@ -116,28 +52,6 @@ app = FastAPI(
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 
-# ================================
-# Global LLM Instance (Loaded Once)
-# ================================
-llm_extractor = None
-
-
-# ================================
-# Load Model On Startup
-# ================================
-@app.on_event("startup")
-def load_llm_on_startup():
-    global llm_extractor
-    print("🔥 Loading LLM model at startup...")
-
-    try:
-        llm_extractor = LlamaJSONExtractor()
-        print("✅ LLM model loaded successfully")
-    except Exception as e:
-        print("❌ Failed to load LLM model")
-        traceback.print_exc()
-        raise e
-
 
 # ================================
 # Utility: Save Uploaded File
@@ -145,76 +59,44 @@ def load_llm_on_startup():
 def save_upload(file: UploadFile) -> Path:
     suffix = Path(file.filename).suffix
     file_path = UPLOAD_DIR / f"{uuid.uuid4()}{suffix}"
-
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
-
     return file_path
 
 
 # ================================
-# Endpoint 1: OCR Only
+# Utility: Process a Single File
 # ================================
-@app.post("/ocr/raw-text")
-async def extract_raw_text(file: UploadFile = File(...)):
+async def process_single_file(file: UploadFile) -> dict:
     """
-    Returns ONLY raw OCR text (no LLM)
+    Process a single file: OCR + LLM extraction.
+    Runs blocking calls in a thread pool to avoid blocking the event loop.
     """
     file_path = save_upload(file)
-
     try:
-        ocr_result = smart_ocr(file_path)
+        loop = asyncio.get_event_loop()
+
+        # Run blocking OCR in thread pool
+        ocr_result = await loop.run_in_executor(None, smart_ocr, file_path)
 
         if not ocr_result.get("success", True):
-            raise HTTPException(status_code=500, detail="OCR failed")
-
-        return {
-            "success": True,
-            "document_type": ocr_result.get("doc_type", "unknown"),
-            "raw_text": ocr_result["text"]
-        }
-
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
-
-    finally:
-        if file_path.exists():
-            file_path.unlink()
-
-
-# ================================
-# Endpoint 2: OCR + LLM Extraction
-# ================================
-@app.post("/ocr/llm-extract")
-async def extract_structured_data(file: UploadFile = File(...)):
-    """
-    Runs OCR + LLM and returns structured JSON
-    """
-    global llm_extractor
-
-    if llm_extractor is None:
-        raise HTTPException(status_code=500, detail="LLM model not loaded")
-
-    file_path = save_upload(file)
-
-    try:
-        # Step 1: OCR
-        ocr_result = smart_ocr(file_path)
-
-        if not ocr_result.get("success", True):
-            raise HTTPException(status_code=500, detail="OCR failed")
+            return {
+                "filename": file.filename,
+                "success": False,
+                "error": "OCR failed"
+            }
 
         raw_text = ocr_result["text"]
         doc_type = ocr_result.get("doc_type", "unknown")
 
-        # Step 2: LLM Extraction
-        structured = llm_extractor.extract_json(
-            raw_text=raw_text,
-            doc_type=doc_type
+        # Run blocking LLM extraction in thread pool
+        structured = await loop.run_in_executor(
+            None,
+            lambda: llm_extractor.extract_json(raw_text=raw_text, doc_type=doc_type)
         )
 
         return {
+            "filename": file.filename,
             "success": True,
             "document_type": doc_type,
             "structured_data": structured
@@ -222,16 +104,73 @@ async def extract_structured_data(file: UploadFile = File(...)):
 
     except Exception as e:
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
-
+        return {
+            "filename": file.filename,
+            "success": False,
+            "error": str(e)
+        }
     finally:
         if file_path.exists():
             file_path.unlink()
 
 
 # ================================
-# Health Check
+# Endpoint 1: OCR Only
 # ================================
+@app.post("/ocr/raw-text")
+async def extract_raw_text(file: UploadFile = File(...)):
+    """Returns ONLY raw OCR text (no LLM)"""
+    file_path = save_upload(file)
+    try:
+        ocr_result = smart_ocr(file_path)
+        if not ocr_result.get("success", True):
+            raise HTTPException(status_code=500, detail="OCR failed")
+        return {
+            "success": True,
+            "document_type": ocr_result.get("doc_type", "unknown"),
+            "raw_text": ocr_result["text"]
+        }
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if file_path.exists():
+            file_path.unlink()
+
+
+
+# Endpoint 2: OCR + LLM (Single or Multiple Files)
+
+@app.post("/ocr/llm-extract")
+async def extract_structured_data(files: List[UploadFile] = File(...)):
+    """
+    Accepts one or more files.
+    Runs OCR + LLM extraction on all files in parallel and returns a list of results.
+    """
+    if llm_extractor is None:
+        raise HTTPException(status_code=500, detail="LLM model not loaded")
+
+    if not files:
+        raise HTTPException(status_code=400, detail="No files uploaded")
+
+    results = await asyncio.gather(
+        *[process_single_file(file) for file in files]
+    )
+
+    total = len(results)
+    succeeded = sum(1 for r in results if r.get("success"))
+
+    return {
+        "total": total,
+        "succeeded": succeeded,
+        "failed": total - succeeded,
+        "results": results
+    }
+
+
+
+# Health Check
+
 @app.get("/")
 async def root():
     return {
